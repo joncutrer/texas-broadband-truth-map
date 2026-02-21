@@ -170,3 +170,62 @@ at `data/raw/tl_2023_us_county/`.
 `data/raw/` is gitignored (large source files). `data/processed/` is committed
 (small output files consumed by the frontend). The `venv/` directory is also
 gitignored.
+
+---
+
+## Workflow orchestration
+
+### 1. Plan first
+- Enter plan mode for any non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, stop and re-plan immediately — don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs upfront to reduce ambiguity
+
+### 2. Subagent strategy
+- Use subagents liberally to keep the main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One tack per subagent for focused execution
+
+### 3. Self-improvement loop
+- After any correction from the user: update `tasks/lessons.md` with the pattern
+- Write rules that prevent the same mistake from recurring
+- Ruthlessly iterate on these lessons until mistake rate drops
+- Review `tasks/lessons.md` at session start for relevant context
+
+### 4. Verification before done
+- Never mark a task complete without proving it works
+- Diff behavior between main and your changes when relevant
+- Ask: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correctness
+
+### 5. Demand elegance (balanced)
+- For non-trivial changes: pause and ask "is there a more elegant way?"
+- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
+- Skip this for simple, obvious fixes — don't over-engineer
+- Challenge your own work before presenting it
+
+### 6. Autonomous bug fixing
+- When given a bug report: just fix it — don't ask for hand-holding
+- Point at logs, errors, failing tests — then resolve them
+- Zero context switching required from the user
+- Go fix failing CI tests without being told how
+
+---
+
+## Task management
+
+1. **Plan first**: Write plan to `tasks/todo.md` with checkable items
+2. **Verify plan**: Check in before starting implementation
+3. **Track progress**: Mark items complete as you go
+4. **Explain changes**: High-level summary at each step
+5. **Document results**: Add a review section to `tasks/todo.md`
+6. **Capture lessons**: Update `tasks/lessons.md` after any correction
+
+---
+
+## Core principles
+
+- **Simplicity first**: Make every change as simple as possible. Impact minimal code.
+- **No laziness**: Find root causes. No temporary fixes. Senior developer standards.
+- **Minimal impact**: Changes should only touch what is necessary. Avoid introducing bugs.
