@@ -1,0 +1,380 @@
+/* Texas Broadband Truth Map — Styles */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --color-bg: #0f1117;
+  --color-surface: #1a1d27;
+  --color-surface-raised: #22263a;
+  --color-border: #2e3350;
+  --color-text: #e8eaf0;
+  --color-text-muted: #8890a8;
+  --color-accent: #4a9eff;
+  --color-accurate: #2ecc71;
+  --color-moderate: #f39c12;
+  --color-severe: #e74c3c;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Fira Code", "Cascadia Code", Consolas, monospace;
+
+  --shadow: 0 2px 12px rgba(0,0,0,0.5);
+  --radius: 8px;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  overflow: hidden;
+}
+
+/* ── Header ───────────────────────────────────────────────────── */
+#header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(15, 17, 23, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--color-border);
+  gap: 12px;
+}
+
+#header-title {
+  display: flex;
+  flex-direction: column;
+}
+
+#header-title h1 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+#header-title p {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* ── Layer Toggle ─────────────────────────────────────────────── */
+#layer-toggle {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.layer-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.layer-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.layer-btn.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ── Map Container ────────────────────────────────────────────── */
+#map {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+/* Override Leaflet attribution */
+.leaflet-control-attribution {
+  background: rgba(15, 17, 23, 0.85) !important;
+  color: var(--color-text-muted) !important;
+  font-size: 10px !important;
+}
+
+.leaflet-control-attribution a {
+  color: var(--color-accent) !important;
+}
+
+.leaflet-control-zoom a {
+  background: var(--color-surface) !important;
+  color: var(--color-text) !important;
+  border-color: var(--color-border) !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background: var(--color-surface-raised) !important;
+}
+
+/* ── Legend ───────────────────────────────────────────────────── */
+#legend {
+  position: absolute;
+  bottom: 28px;
+  right: 12px;
+  z-index: 1000;
+  background: rgba(26, 29, 39, 0.95);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  min-width: 160px;
+  box-shadow: var(--shadow);
+}
+
+#legend h3 {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
+.legend-scale {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--color-text);
+}
+
+.legend-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-gradient {
+  width: 100%;
+  height: 12px;
+  border-radius: 3px;
+  margin-bottom: 4px;
+}
+
+.legend-range {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+}
+
+/* ── Popup ────────────────────────────────────────────────────── */
+.leaflet-popup-content-wrapper {
+  background: var(--color-surface) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow) !important;
+  padding: 0 !important;
+}
+
+.leaflet-popup-tip {
+  background: var(--color-surface) !important;
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+  color: var(--color-text) !important;
+  font-family: var(--font-sans) !important;
+  width: 260px !important;
+}
+
+.popup-inner {
+  padding: 14px 16px;
+}
+
+.popup-county {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+  color: var(--color-text);
+}
+
+.popup-ratio {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  float: right;
+  margin-top: 2px;
+}
+
+.popup-ratio.accurate { background: #1a4a2e; color: #2ecc71; }
+.popup-ratio.moderate { background: #4a3200; color: #f39c12; }
+.popup-ratio.severe   { background: #4a1010; color: #e74c3c; }
+.popup-ratio.extreme  { background: #3a0808; color: #ff6b6b; }
+
+.popup-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.popup-stat {
+  background: var(--color-surface-raised);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.popup-stat-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-bottom: 3px;
+}
+
+.popup-stat-value {
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.popup-stat-value.claimed { color: #4a9eff; }
+.popup-stat-value.actual  { color: #2ecc71; }
+.popup-stat-value.ratio   { color: #f39c12; }
+
+.popup-providers {
+  margin-top: 6px;
+}
+
+.popup-providers-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.provider-tag {
+  display: inline-block;
+  padding: 2px 7px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 0.68rem;
+  color: var(--color-text);
+  margin: 2px 2px 2px 0;
+}
+
+/* ── Stats Bar ────────────────────────────────────────────────── */
+#stats-bar {
+  position: absolute;
+  bottom: 28px;
+  left: 12px;
+  z-index: 1000;
+  background: rgba(26, 29, 39, 0.95);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  box-shadow: var(--shadow);
+  display: flex;
+  gap: 20px;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-item-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+  display: block;
+}
+
+.stat-item-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* ── Mock data badge ──────────────────────────────────────────── */
+#mock-badge {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: rgba(243, 156, 18, 0.15);
+  border: 1px solid rgba(243, 156, 18, 0.4);
+  border-radius: 20px;
+  padding: 3px 12px;
+  font-size: 0.65rem;
+  color: #f39c12;
+  pointer-events: none;
+}
+
+/* ── Mobile ───────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  #header {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+  }
+
+  #header-title h1 { font-size: 0.85rem; }
+  #header-title p  { display: none; }
+
+  #map { top: 72px; }
+  #mock-badge { top: 80px; }
+
+  .layer-btn {
+    padding: 4px 8px;
+    font-size: 0.68rem;
+  }
+
+  #stats-bar {
+    gap: 12px;
+    padding: 8px 10px;
+    bottom: 24px;
+  }
+
+  .stat-item-value { font-size: 0.9rem; }
+
+  #legend {
+    bottom: 24px;
+    right: 8px;
+    padding: 8px 10px;
+    min-width: 140px;
+  }
+
+  .leaflet-popup-content {
+    width: 220px !important;
+  }
+}
