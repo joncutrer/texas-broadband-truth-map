@@ -18,7 +18,7 @@ const CONFIG = {
   maxZoom: 12,
   // Rough bounding box around Texas
   maxBounds: [[25.0, -107.5], [37.5, -92.5]],
-  dataUrl: "../data/processed/counties.geojson",
+  dataUrl: "data/processed/counties.geojson",
   tileUrl: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
   tileAttrib: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
 };

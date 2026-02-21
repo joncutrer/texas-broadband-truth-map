@@ -1,0 +1,47 @@
+name: Refresh Broadband Data
+
+on:
+  # Ookla open data releases quarterly; run shortly after each quarter starts
+  schedule:
+    - cron: "0 4 2 1,4,7,10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Run pipeline
+        run: |
+          # Use real pipeline scripts when FCC/Ookla credentials are configured,
+          # otherwise fall back to mock data generator for CI/staging.
+          if [ -n "$FCC_API_KEY" ]; then
+            python pipeline/fetch_fcc.py
+            python pipeline/fetch_ookla.py
+            python pipeline/build_geojson.py
+          else
+            echo "No FCC_API_KEY set — generating mock data"
+            python pipeline/generate_mock_data.py
+          fi
+        env:
+          FCC_API_KEY: ${{ secrets.FCC_API_KEY }}
+
+      - name: Commit updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/processed/
+          git diff --cached --quiet || git commit -m "chore: refresh broadband data ($(date -u +%Y-%m-%d)) [skip ci]"
+          git push
