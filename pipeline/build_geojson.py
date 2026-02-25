@@ -1,51 +1,35 @@
 """
-build_geojson.py — Spatial join of FCC + Ookla data → county-level GeoJSON.
+build_geojson.py — Build county GeoJSON from FCC BDC data.
 
 Pipeline:
   1. Load fcc_tx_fwa.parquet        (from fetch_fcc.py)
-  2. Load ookla_tx_{y}_q{q}.parquet (from fetch_ookla.py)
-  3. Load Texas county boundaries   (from TIGER/Line shapefiles or USCB API)
-  4. Spatially join FCC points → counties  (point-in-polygon)
-  5. Convert Ookla quadkey tiles → polygons, spatially join → counties
-  6. Aggregate per county:
-       - Top fixed wireless providers (by # of locations served)
-       - Max FCC claimed download/upload speed (per county)
-       - Average Ookla actual download/upload speed (weighted by test count)
-       - Overstatement ratio = fcc_max_dl / ookla_avg_dl
-  7. Merge aggregates onto county GeoJSON features
-  8. Write:
+  2. Load Texas county boundaries   (from local zip in data/raw/)
+  3. Aggregate FCC data by county_geoid (no spatial join needed)
+  4. Optionally load Ookla data     (if parquet exists in data/raw/)
+  5. Merge aggregates onto county GeoDataFrame
+  6. Write:
        data/processed/counties.geojson
        data/processed/providers.json
 
 Usage:
-    python pipeline/build_geojson.py --year 2023 --quarter 4
-
-Dependencies:
-    pip install geopandas shapely pyarrow pandas tqdm
-
-County boundaries source (TIGER/Line):
-    https://www2.census.gov/geo/tiger/TIGER2023/COUNTY/
-    → tl_2023_us_county.zip  (filter to STATE_FP == '48' for Texas)
+    uv run python pipeline/build_geojson.py [--year 2023] [--quarter 4]
 """
 
 import argparse
+import io
 import json
 import math
 import sys
+import zipfile
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Polygon
-from tqdm import tqdm
 
 RAW_DIR       = Path(__file__).parent.parent / "data" / "raw"
 PROCESSED_DIR = Path(__file__).parent.parent / "data" / "processed"
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-
-TIGER_COUNTY_URL = (
-    "https://www2.census.gov/geo/tiger/TIGER2023/COUNTY/tl_2023_us_county.zip"
-)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -84,115 +68,149 @@ def quadkey_to_polygon(quadkey: str) -> Polygon:
 
 
 def load_county_boundaries() -> gpd.GeoDataFrame:
-    """Load Texas county boundaries from TIGER/Line or a cached shapefile."""
-    cached = RAW_DIR / "tl_2023_us_county" / "tl_2023_us_county.shp"
-    if not cached.exists():
-        zip_path = RAW_DIR / "tl_2023_us_county.zip"
-        if not zip_path.exists():
-            print(f"[build] Downloading TIGER/Line county boundaries from {TIGER_COUNTY_URL} …")
-            import urllib.request
-            urllib.request.urlretrieve(TIGER_COUNTY_URL, zip_path)
-        import zipfile
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(RAW_DIR / "tl_2023_us_county")
+    """Load Texas county boundaries from the local zip in data/raw/."""
+    matches = list(RAW_DIR.glob("Texas_County_Boundaries_*.zip"))
+    if not matches:
+        print(
+            "[build] ERROR: No Texas_County_Boundaries_*.zip found in data/raw/.\n"
+            "  Expected: Texas_County_Boundaries_*.zip"
+        )
+        sys.exit(1)
 
-    gdf = gpd.read_file(cached)
-    gdf = gdf[gdf["STATEFP"] == "48"].copy()
-    gdf = gdf.rename(columns={"GEOID": "GEOID", "NAME": "NAME"})
-    return gdf.to_crs("EPSG:4326")
+    zip_path = matches[0]
+    print(f"[build] Loading county boundaries from {zip_path.name} …")
+
+    with zipfile.ZipFile(zip_path) as zf:
+        geojson_files = [n for n in zf.namelist() if n.endswith(".geojson")]
+        if not geojson_files:
+            print(f"[build] ERROR: No .geojson file found inside {zip_path.name}")
+            sys.exit(1)
+        geojson_name = geojson_files[0]
+        geojson_bytes = zf.read(geojson_name)
+
+    gdf = gpd.read_file(io.BytesIO(geojson_bytes))
+
+    # Rename local-zip fields to match the rest of the pipeline
+    # Local zip: FIPS_ST_CNTY_CD (county GEOID), CNTY_NM (county name)
+    # Pipeline:  GEOID, NAME
+    gdf = gdf.rename(columns={
+        "FIPS_ST_CNTY_CD": "GEOID",
+        "CNTY_NM":         "NAME",
+    })
+    gdf = gdf[["GEOID", "NAME", "geometry"]].copy()
+
+    # Ensure CRS is set (GeoJSON may not include explicit CRS member)
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
+    else:
+        gdf = gdf.to_crs("EPSG:4326")
+
+    print(f"[build]   {len(gdf)} Texas counties loaded")
+    return gdf
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def build_geojson(year: int, quarter: int) -> None:
-    # 1. Load FCC data
+    # ── 1. Load FCC data ──────────────────────────────────────────────────────
     fcc_path = RAW_DIR / "fcc_tx_fwa.parquet"
     if not fcc_path.exists():
         print(f"[build] Missing {fcc_path}. Run fetch_fcc.py first.")
         sys.exit(1)
     print("[build] Loading FCC data …")
     fcc = pd.read_parquet(fcc_path)
-    fcc_gdf = gpd.GeoDataFrame(
-        fcc,
-        geometry=gpd.points_from_xy(fcc["longitude"], fcc["latitude"]),
-        crs="EPSG:4326",
-    )
+    print(f"[build]   {len(fcc):,} FCC rows, {fcc['county_geoid'].nunique()} unique counties")
 
-    # 2. Load Ookla data
-    ookla_path = RAW_DIR / f"ookla_tx_{year}_q{quarter}.parquet"
-    if not ookla_path.exists():
-        print(f"[build] Missing {ookla_path}. Run fetch_ookla.py first.")
-        sys.exit(1)
-    print("[build] Loading Ookla data …")
-    ookla = pd.read_parquet(ookla_path)
-    print(f"  {len(ookla):,} Ookla tiles")
-
-    # 3. County boundaries
-    print("[build] Loading county boundaries …")
+    # ── 2. Load county boundaries ─────────────────────────────────────────────
     counties = load_county_boundaries()
-    print(f"  {len(counties)} Texas counties")
 
-    # 4. FCC → county join
-    print("[build] Joining FCC points → counties …")
-    fcc_joined = gpd.sjoin(fcc_gdf, counties[["GEOID", "NAME", "geometry"]],
-                           how="left", predicate="within")
-    fcc_joined = fcc_joined.dropna(subset=["GEOID"])
-
-    # Aggregate FCC: max claimed speed per county, top providers
+    # ── 3. Aggregate FCC by county — no spatial join needed ──────────────────
+    # county_geoid was derived from block_geoid[:5] in fetch_fcc.py
+    print("[build] Aggregating FCC data by county …")
     fcc_county = (
-        fcc_joined.groupby("GEOID")
+        fcc.groupby("county_geoid")
         .agg(
             fcc_claimed_down_mbps=("max_advertised_download_speed", "max"),
             fcc_claimed_up_mbps=("max_advertised_upload_speed", "max"),
         )
         .reset_index()
+        .rename(columns={"county_geoid": "GEOID"})
     )
 
+    # Top 3 providers per county by unique location count
     provider_counts = (
-        fcc_joined.groupby(["GEOID", "brand_name"])
-        .size()
+        fcc.groupby(["county_geoid", "brand_name"])["location_id"]
+        .nunique()
         .reset_index(name="loc_count")
-        .sort_values(["GEOID", "loc_count"], ascending=[True, False])
+        .sort_values(["county_geoid", "loc_count"], ascending=[True, False])
     )
     top_providers = (
-        provider_counts.groupby("GEOID")
-        .apply(lambda g: g.head(3)["brand_name"].tolist())
+        provider_counts.groupby("county_geoid")
+        .apply(lambda g: g.head(3)["brand_name"].tolist(), include_groups=False)
         .reset_index(name="top_providers")
+        .rename(columns={"county_geoid": "GEOID"})
     )
 
-    # 5. Ookla → county join (tile polygons)
-    print("[build] Converting Ookla quadkeys → polygons (this may take a while) …")
-    ookla_geoms = [quadkey_to_polygon(qk) for qk in tqdm(ookla["quadkey"])]
-    ookla_gdf = gpd.GeoDataFrame(ookla, geometry=ookla_geoms, crs="EPSG:4326")
+    # ── 4. Ookla data (optional) ──────────────────────────────────────────────
+    ookla_path = RAW_DIR / f"ookla_tx_{year}_q{quarter}.parquet"
+    has_ookla = ookla_path.exists()
 
-    print("[build] Joining Ookla tiles → counties …")
-    ookla_joined = gpd.sjoin(
-        ookla_gdf[["quadkey", "avg_d_mbps", "avg_u_mbps", "tests", "geometry"]],
-        counties[["GEOID", "geometry"]],
-        how="left",
-        predicate="intersects",
-    ).dropna(subset=["GEOID"])
+    if has_ookla:
+        print(f"[build] Loading Ookla data from {ookla_path.name} …")
+        ookla = pd.read_parquet(ookla_path)
+        print(f"[build]   {len(ookla):,} Ookla tiles")
 
-    ookla_county = (
-        ookla_joined.groupby("GEOID")
-        .apply(lambda g: pd.Series({
-            "ookla_actual_down_mbps": (g["avg_d_mbps"] * g["tests"]).sum() / g["tests"].sum(),
-            "ookla_actual_up_mbps":   (g["avg_u_mbps"] * g["tests"]).sum() / g["tests"].sum(),
-        }))
-        .reset_index()
-    )
+        print("[build] Converting Ookla quadkeys → polygons …")
+        ookla_geoms = [quadkey_to_polygon(qk) for qk in ookla["quadkey"]]
+        ookla_gdf = gpd.GeoDataFrame(ookla, geometry=ookla_geoms, crs="EPSG:4326")
 
-    # 6. Merge onto county GeoDataFrame
+        print("[build] Joining Ookla tiles → counties …")
+        ookla_joined = gpd.sjoin(
+            ookla_gdf[["quadkey", "avg_d_mbps", "avg_u_mbps", "tests", "geometry"]],
+            counties[["GEOID", "geometry"]],
+            how="left",
+            predicate="intersects",
+        ).dropna(subset=["GEOID"])
+
+        ookla_county = (
+            ookla_joined.groupby("GEOID")
+            .apply(
+                lambda g: pd.Series({
+                    "ookla_actual_down_mbps": (
+                        (g["avg_d_mbps"] * g["tests"]).sum() / g["tests"].sum()
+                    ),
+                    "ookla_actual_up_mbps": (
+                        (g["avg_u_mbps"] * g["tests"]).sum() / g["tests"].sum()
+                    ),
+                }),
+                include_groups=False,
+            )
+            .reset_index()
+        )
+    else:
+        print(
+            f"[build] Ookla data not found at {ookla_path.name}. "
+            "Skipping — using defaults (10/2 Mbps). "
+            "Run fetch_ookla.py to enable real measurements."
+        )
+        ookla_county = None
+
+    # ── 5. Merge aggregates onto county GeoDataFrame ──────────────────────────
     print("[build] Merging aggregates …")
     result = counties.merge(fcc_county,   on="GEOID", how="left")
-    result = result.merge(ookla_county,   on="GEOID", how="left")
     result = result.merge(top_providers,  on="GEOID", how="left")
 
-    result["fcc_claimed_down_mbps"].fillna(25.0, inplace=True)
-    result["fcc_claimed_up_mbps"].fillna(3.0,   inplace=True)
-    result["ookla_actual_down_mbps"].fillna(10.0, inplace=True)
-    result["ookla_actual_up_mbps"].fillna(2.0,   inplace=True)
-    result["top_providers"].fillna("", inplace=True)
+    if ookla_county is not None:
+        result = result.merge(ookla_county, on="GEOID", how="left")
+    else:
+        result["ookla_actual_down_mbps"] = 10.0
+        result["ookla_actual_up_mbps"]   = 2.0
+
+    # Fill defaults for counties with no FCC data
+    result["fcc_claimed_down_mbps"]  = result["fcc_claimed_down_mbps"].fillna(25.0)
+    result["fcc_claimed_up_mbps"]    = result["fcc_claimed_up_mbps"].fillna(3.0)
+    result["ookla_actual_down_mbps"] = result["ookla_actual_down_mbps"].fillna(10.0)
+    result["ookla_actual_up_mbps"]   = result["ookla_actual_up_mbps"].fillna(2.0)
     result["top_providers"] = result["top_providers"].apply(
         lambda x: x if isinstance(x, list) else []
     )
@@ -201,39 +219,57 @@ def build_geojson(year: int, quarter: int) -> None:
         result["fcc_claimed_down_mbps"] / result["ookla_actual_down_mbps"]
     ).round(2)
 
-    # 7. Write counties.geojson
+    # ── 6. Write counties.geojson ─────────────────────────────────────────────
     out_geojson = PROCESSED_DIR / "counties.geojson"
     print(f"[build] Writing {out_geojson} …")
-    result[["GEOID", "NAME", "geometry",
-            "fcc_claimed_down_mbps", "fcc_claimed_up_mbps",
-            "ookla_actual_down_mbps", "ookla_actual_up_mbps",
-            "overstatement_ratio", "top_providers"]].to_file(
-        out_geojson, driver="GeoJSON"
-    )
+    result[[
+        "GEOID", "NAME", "geometry",
+        "fcc_claimed_down_mbps", "fcc_claimed_up_mbps",
+        "ookla_actual_down_mbps", "ookla_actual_up_mbps",
+        "overstatement_ratio", "top_providers",
+    ]].to_file(out_geojson, driver="GeoJSON")
 
-    # 8. Write providers.json
+    # ── 7. Write providers.json ───────────────────────────────────────────────
     out_providers = PROCESSED_DIR / "providers.json"
     print(f"[build] Writing {out_providers} …")
+
+    # Aggregate by (county_geoid, brand_name) — one entry per provider per county
+    provider_agg = (
+        fcc.groupby(["county_geoid", "brand_name"])
+        .agg(
+            fcc_claimed_down=("max_advertised_download_speed", "max"),
+            fcc_claimed_up=("max_advertised_upload_speed", "max"),
+            tech_code=("technology", "first"),
+        )
+        .reset_index()
+    )
+
     providers_dict = {}
-    for _, row in fcc_joined.iterrows():
-        geoid = row.get("GEOID")
-        if not geoid or pd.isna(geoid):
-            continue
+    for _, row in provider_agg.iterrows():
+        geoid = str(row["county_geoid"])
         entry = {
-            "name":           row.get("brand_name", "Unknown"),
-            "fcc_claimed_down": float(row.get("max_advertised_download_speed", 0) or 0),
-            "fcc_claimed_up":   float(row.get("max_advertised_upload_speed", 0) or 0),
-            "tech_code": 70,
+            "name":             row["brand_name"],
+            "fcc_claimed_down": float(row["fcc_claimed_down"] or 0),
+            "fcc_claimed_up":   float(row["fcc_claimed_up"] or 0),
+            "tech_code":        int(row["tech_code"]),
         }
-        providers_dict.setdefault(str(geoid), []).append(entry)
+        providers_dict.setdefault(geoid, []).append(entry)
+
     with open(out_providers, "w") as f:
         json.dump(providers_dict, f)
 
     print(f"[build] Done. {len(result)} counties written.")
+    if not has_ookla:
+        print(
+            "[build] NOTE: Ookla data unavailable — overstatement ratios use "
+            "default 10 Mbps actual-speed baseline."
+        )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build county GeoJSON from FCC + Ookla data.")
+    parser = argparse.ArgumentParser(
+        description="Build county GeoJSON from FCC BDC + optional Ookla data."
+    )
     parser.add_argument("--year",    type=int, default=2023)
     parser.add_argument("--quarter", type=int, default=4, choices=[1, 2, 3, 4])
     args = parser.parse_args()
